@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name             Thread Watcher
+// @name             Thread Watcher And Thread Activity Watcher
 // @namespace        com.kongregate.resterman
-// @author           resterman
-// @version          1.0.1
+// @author           resterman, unknownguardian
+// @version          1.0.5
 // @include          http://www.kongregate.com/community*
 // @include          http://www.kongregate.com/forums/*
 // @description      Watch threads for new posts.
@@ -107,12 +107,12 @@ Thread.getPostIdFromUrl = function (url) {
 };
 
 Thread.getThreadIdFromUrl = function (url) {
-    var matches = url.match(/topics\/([0-9]+)-/);
+    var matches = url.match(/topics\/([0-9]+)/);
     return matches !== null ? parseInt(matches[1]) : null;
 };
 
 Thread.getForumIdFromUrl = function (url) {
-    var matches = url.match(/forums\/([0-9]+)-/);
+    var matches = url.match(/forums\/([0-9]+)/);
     return matches !== null ? parseInt(matches[1]) : null;
 };
 
@@ -232,6 +232,8 @@ function thread() {
             });
         });
     });
+
+    updateIfThreadIsRecent(id)
 }
 
 
@@ -288,6 +290,225 @@ function community() {
 
 }
 
+function buildWelcomeBarIcon() {
+    console.log("Building Welcome Bar");
+    var welcomeBar = $("nav_welcome_box");
+    var welcomeBarElementToInsertAfter = $$(".friends");
+    var forumIcon = new Element('li', {
+        class:'messages profile_control'
+    }).update("Forum")
+    .setStyle({
+        width:"80px",
+        cursor: 'pointer',
+        'font': "600 14px/27px 'Source Sans Pro', 'Helvetica', Arial, sans-serif",
+        'padding-left': '7px'
+    });
+
+    
+    var linkElement = new Element('a', {
+            class: 'my-messages',
+            href: '#'
+        })
+        .setStyle({
+            display:'inline-block',
+            'padding-left':'0px'
+        });
+
+    var iconElement = new Element('span', {
+            class: 'alert_messages',
+            id:'profile_bar_messages',
+            href: '#'
+        });
+
+    var alertIconElement = new Element('span', {
+            class: 'kong_ico',
+            href: '#'
+        }).update("");
+
+    var alertMessageElement = new Element('span', {
+            class: 'msg-count mls has_messages',
+            id:'forum_counter',
+            href: '#'
+        }).update("1");
+    forumIcon.insert(linkElement);
+    linkElement.insert(iconElement);
+    iconElement.insert(alertIconElement);
+    iconElement.insert(alertMessageElement);
+
+    welcomeBarElementToInsertAfter.first().insert({after:forumIcon});
+
+/*li
+<a class="my-messages" href="/accounts/UnknownGuardian/private_messages" id="my-messages-link" title="0 shouts, 1 whispers">  
+      <span id="profile_bar_messages" class="alert_messages">
+          <span aria-hidden="true" class="kong_ico">m</span><span id="profile_control_unread_message_count" class="msg-count mls has_messages">1</span>
+        </span>
+</a>
+li*/
+
+
+}
+var TIME_BETWEEN_PULLS = 1000 * 60 * 0; // 1000 milliseconds per 1 second * 60 seconds per 1 minute * 5 minutes (greater than 5 minutes have past)
+var MAX_RECENT_POSTS = 25;
+function startRecentPostsPull() {
+    PULL_ID = "posts_ajax_last_request";
+    
+    var lastPullDate = Date.parse(localStorage.getItem(PULL_ID) || 0); //default to 0
+    var currentDate = new Date();
+    if(currentDate - lastPullDate > TIME_BETWEEN_PULLS) {
+        pullWatchedThreadsAndRecentPosts();
+    }
+    else {
+        var timeLeftToElapse = TIME_BETWEEN_PULLS - (currentDate - lastPullDate);
+        setTimeout(timeLeftToElapse, pullWatchedThreadsAndRecentPosts);
+    }
+}
+
+function pullWatchedThreadsAndRecentPosts() {
+     localStorage.setItem(PULL_ID, new Date());
+      new Ajax.Request('http://www.kongregate.com/users/' + active_user.id() + '/posts.json', {
+          method:'get',
+          onSuccess: function(transport){ 
+             var json = transport.responseText.evalJSON();console.log("Found users", json.users.length);
+             var idsOfRecentThreads = [];
+             var idsOfRecentForums = [];
+             for(var j = 0; j < json.posts.length && j < MAX_RECENT_POSTS;j++) {
+                var threadID = json.posts[j].topic_id;
+                idsOfRecentThreads.push(threadID);
+                idsOfRecentForums.push(getForumIDFromThreadID(json,threadID));
+             }
+             console.log("[Thread Watcher] We'll want to pull recent threads with IDS", idsOfRecentThreads);
+             clearOldThreads(idsOfRecentThreads, idsOfRecentForums);
+             checkIfUpdateToListOfThreads(idsOfRecentThreads);
+           },
+          onFailure: function(t) {   
+            //silently fail 
+            console.log("[Thread Watcher] We could not find the latest posts");
+            }
+        });
+
+      setTimeout(TIME_BETWEEN_PULLS, pullWatchedThreadsAndRecentPosts);
+}
+
+function getForumIDFromThreadID(json, id) {
+    for(var i = 0; i < json.topics.length;i++) {
+        if(json.topics[i].id == id) {
+            return json.topics[i].forum_id;
+        }
+    }
+    return -1; //some might not have this?
+}
+
+/* array of new thread ids. Discard those that don't match up */
+var STORED_RECENT_THREADS = "stored_recent_threads";
+var STORED_RECENT_THREADS_PREFIX = "thread_";
+function clearOldThreads(arr, arrForums) {
+    console.log("[Thread Watcher] Clearing old threads: ", STORED_RECENT_THREADS);
+    var alreadyStored = JSON.parse(localStorage.getItem(STORED_RECENT_THREADS)) || {};
+    var newToStore = {};
+    for(var i = 0; i < arr.length;i++) {
+        console.log("[Thread Watcher] Clearing old threads inner", i);
+        if(alreadyStored[STORED_RECENT_THREADS_PREFIX + arr[i]] != undefined) { //only copy over the ones that exist in the new array. discard the other ones
+            newToStore[STORED_RECENT_THREADS_PREFIX + arr[i]] = alreadyStored[STORED_RECENT_THREADS_PREFIX + arr[i]]; //what is stored is the post count and forum ID
+        }
+        else {
+            newToStore[STORED_RECENT_THREADS_PREFIX + arr[i]] = {forumID:arrForums[i], seenPostCount:0, livePostCount:0}
+        }
+    }
+    console.log("[Thread Watcher] Clearing old threads saving");
+    localStorage.setItem(STORED_RECENT_THREADS, JSON.stringify(newToStore)); //set the item to the ones we are interested in.
+}
+
+var THREADS_TO_PROCESS = "threads_to_process";
+var THREADS_ARE_CURRENTLY_PROCESSING = "threads_currently_processing";
+function checkIfUpdateToListOfThreads(arr) {
+    console.log("[Thread Watcher] Checking if up to date with list of threads");
+    var toProcess = JSON.parse(localStorage.getItem(THREADS_TO_PROCESS));
+    if(toProcess == null)
+        toProcess = [];
+    toProcess = toProcess.concat(arr);
+    localStorage.setItem(THREADS_TO_PROCESS, JSON.stringify(toProcess)); //save the newly concatenated process list
+    var isProcessing = JSON.parse(localStorage.getItem(THREADS_ARE_CURRENTLY_PROCESSING)) || false; //default to false
+    console.log("[Thread Watcher] Checking if up to date with list of threads finished. Is it currently running?", isProcessing);
+    if(!isProcessing) {
+        console.log("[Thread Watcher] Checking if up to date with list of threads finished. Before");
+        processThreadsCheckingForUpdates();
+        console.log("[Thread Watcher] Checking if up to date with list of threads finished. after");
+    }
+}
+
+function processThreadsCheckingForUpdates() {
+    console.log("[Thread Watcher] Processing threads checking for updates");
+    localStorage.setItem(THREADS_ARE_CURRENTLY_PROCESSING, true);
+    var currentListToProcess = JSON.parse(localStorage.getItem(THREADS_TO_PROCESS)) || [];
+    if(currentListToProcess.length == 0) {
+        //exit early. Not sure why it got here, perhaps recursion
+        console.log("[Thread Watcher] Current list to process is length of 0, Halting.");
+        localStorage.setItem(THREADS_ARE_CURRENTLY_PROCESSING, false);
+        return;
+    }
+
+    var alreadyStored = JSON.parse(localStorage.getItem(STORED_RECENT_THREADS)) || {};
+    var processThreadID = currentListToProcess.shift();
+    var storedThread = alreadyStored[STORED_RECENT_THREADS_PREFIX + processThreadID];
+    if(storedThread == undefined) {
+        console.log("[Thread Watcher] Stored object was undefined:", processThreadID, " Halting.");
+        localStorage.setItem(THREADS_ARE_CURRENTLY_PROCESSING, false);
+        return;
+    }
+    var forumID = storedThread.forumID;
+    var seenPostCount = storedThread.seenPostCount;
+    console.log("[Thread Watcher] We are making a request to:", 'http://www.kongregate.com/forums/' + forumID + '/topics/' + processThreadID + '.json');
+     new Ajax.Request('http://www.kongregate.com/forums/' + forumID + '/topics/' + processThreadID + '.json', {
+          method:'get',
+          onSuccess: function(transport){ 
+            console.log("[Thread Watcher] We got a response to:", 'http://www.kongregate.com/forums/' + forumID + '/topics/' + processThreadID + '.json');
+             var json = transport.responseText.evalJSON();
+             var livePostCount = json.topic.posts_count;
+             if(livePostCount != seenPostCount) {
+                console.log("[Thread Watcher] We've found a thread that has new activity:" , livePostCount - seenPostCount, "new posts. Thread ID:", processThreadID);
+                storedThread.livePostCount = livePostCount;
+                
+             }
+             localStorage.setItem(STORED_RECENT_THREADS, JSON.stringify(alreadyStored));
+             updateThreadIcon();
+             localStorage.setItem(THREADS_TO_PROCESS, JSON.stringify(currentListToProcess)); //save the shifted array
+             //recursive call:
+             processThreadsCheckingForUpdates();
+           },
+          onFailure: function(t) {   
+            //silently fail 
+             console.log("[Thread Watcher] We could not find the thread");
+            }
+        });
+}
+
+function updateIfThreadIsRecent(id) {
+    console.log("[Thread Watcher] Updating if thread is recent", id);
+    var alreadyStored = JSON.parse(localStorage.getItem(STORED_RECENT_THREADS)) || {};
+    console.log("We found", alreadyStored);
+    if(alreadyStored[STORED_RECENT_THREADS_PREFIX + id] != undefined) {
+        console.log("[Thread Watcher] Updating recent thread to live post count");
+        var thread = alreadyStored[STORED_RECENT_THREADS_PREFIX + id];
+        thread.seenPostCount = thread.livePostCount;
+        localStorage.setItem(STORED_RECENT_THREADS, JSON.stringify(alreadyStored));
+    }
+}
+
+function updateThreadIcon() {
+    var numberOfThreadsWithUpdates = 0;
+    var alreadyStored = JSON.parse(localStorage.getItem(STORED_RECENT_THREADS)) || {};
+    for (var key in alreadyStored) {
+      if (alreadyStored.hasOwnProperty(key)) {
+        var thread = alreadyStored[key];
+        if(thread.livePostCount > thread.seenPostCount) {
+            numberOfThreadsWithUpdates++;
+        }
+      }
+    }
+    console.log("[Thread Watcher] Updating count in welcome bar");
+    $('forum_counter').update(numberOfThreadsWithUpdates);
+}
+
 (function() {
     'use strict';
     if (/\.com\/forums\/.*\/topics/.test(location.href))
@@ -296,4 +517,7 @@ function community() {
         threads();
     else if (/\.com\/community/.test(location.href))
         community();
+    
+    buildWelcomeBarIcon();
+    startRecentPostsPull();
 })();
