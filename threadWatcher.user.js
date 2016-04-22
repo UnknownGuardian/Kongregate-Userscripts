@@ -3,8 +3,7 @@
 // @namespace        com.kongregate.resterman
 // @author           resterman, unknownguardian
 // @version          1.0.5
-// @include          http://www.kongregate.com/community*
-// @include          http://www.kongregate.com/forums/*
+// @include          http://www.kongregate.com/*
 // @description      Watch threads for new posts.
 // ==/UserScript==
 
