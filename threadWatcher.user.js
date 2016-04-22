@@ -290,6 +290,11 @@ function community() {
 }
 
 function buildWelcomeBarIcon() {
+    //on new page load, we will strip the "is parsing right now";
+    var isProcessing = JSON.parse(localStorage.getItem(THREADS_ARE_CURRENTLY_PROCESSING)) || false;
+    if(isProcessing)
+        localStorage.setItem(THREADS_ARE_CURRENTLY_PROCESSING, false);
+
     console.log("Building Welcome Bar");
     var welcomeBar = $("nav_welcome_box");
     var welcomeBarElementToInsertAfter = $$(".friends");
@@ -340,6 +345,8 @@ function buildWelcomeBarIcon() {
 
     welcomeBarElementToInsertAfter.first().insert({after:forumIcon});
 
+    addSettings();
+
 /*li
 <a class="my-messages" href="/accounts/UnknownGuardian/private_messages" id="my-messages-link" title="0 shouts, 1 whispers">  
       <span id="profile_bar_messages" class="alert_messages">
@@ -375,6 +382,7 @@ function startRecentPostsPull() {
     else {
         var timeLeftToElapse = TIME_BETWEEN_PULLS - (currentDate - lastPullDate);
         setTimeout(pullWatchedThreadsAndRecentPosts,timeLeftToElapse);
+        updateThreadIcon();
     }
 }
 
@@ -546,8 +554,10 @@ function updateThreadIcon() {
     }
     console.log("[Thread Watcher] Updating count in welcome bar");
     $('forum_counter').update(threadsWithUpdatesMetaData.length);
-    
+    addSettings();
+}
 
+function addSettings() {
     var clear_cache_setting = new Element("span",{class:"setting_in_menu"}).update("Clear Cache");
     clear_cache_setting.on("click", function(e) {
         localStorage.removeItem(STORED_RECENT_THREADS);
