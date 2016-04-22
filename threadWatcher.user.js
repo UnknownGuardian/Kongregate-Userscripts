@@ -233,7 +233,7 @@ function thread() {
         });
     });
 
-    updateIfThreadIsRecent(id)
+    updateIfThreadIsRecent(id);
 }
 
 
@@ -295,7 +295,7 @@ function buildWelcomeBarIcon() {
     var welcomeBar = $("nav_welcome_box");
     var welcomeBarElementToInsertAfter = $$(".friends");
     var forumIcon = new Element('li', {
-        class:'messages profile_control'
+        class:'forum_profile_control messages profile_control'
     }).update("Forum")
     .setStyle({
         width:"80px",
@@ -330,8 +330,12 @@ function buildWelcomeBarIcon() {
             id:'forum_counter',
             href: '#'
         }).update("1");
+    var threadDisplayElement = new Element('ul', {
+        id:'forum_activity_lister'
+    });
     forumIcon.insert(linkElement);
     linkElement.insert(iconElement);
+    linkElement.insert(threadDisplayElement);
     iconElement.insert(alertIconElement);
     iconElement.insert(alertMessageElement);
 
@@ -344,10 +348,22 @@ function buildWelcomeBarIcon() {
         </span>
 </a>
 li*/
-
+    var css = document.createElement('style');
+    css.innerHTML =  ".welcome-user .forum_profile_control.messages:hover{background-color:#423f3e;padding-bottom:1px}";
+    css.innerHTML += ".welcome-user .forum_profile_control{cursor:pointer;width:49px}";
+    css.innerHTML += ".welcome-user .forum_profile_control:hover ul{background-color:#423f3e;display:block}";
+    css.innerHTML += ".welcome-user .forum_profile_control ul a{color:#fff;display:inline-block;font:600 14px/35px 'Source Sans Pro',Helvetica,Arial,sans-serif;padding:0 0px;position:relative;text-decoration:none;width:100%}";
+    css.innerHTML += ".welcome-user .forum_profile_control ul li a:after{border-bottom:1px dotted #9b9a9a;bottom:0;content:'';display:block;left:0px;position:absolute;right:0px}";
+    css.innerHTML += ".welcome-user .forum_profile_control ul{display:none;list-style:none;position:absolute;right:0;top:100%;width:480px;text-align: left;padding: 0 15px;}";
+    css.innerHTML += ".welcome-user .forum_profile_control ul li .faded_in_menu{color:#bbb}";
+    css.innerHTML += ".welcome-user .forum_profile_control ul li .thread_title_in_menu:hover{color:#ffe9ad !important}";
+    css.innerHTML += ".welcome-user .forum_profile_control ul li .post_count_in_menu{color:#bbb; float:right}";
+    css.innerHTML += ".welcome-user .forum_profile_control ul .setting_in_menu{color:#bbb; font-size:12px; padding-right:15px}";
+    css.innerHTML += ".welcome-user .forum_profile_control ul .setting_in_menu:hover{color:#ffe9ad;}";
+    document.head.appendChild(css);
 
 }
-var TIME_BETWEEN_PULLS = 1000 * 60 * 0; // 1000 milliseconds per 1 second * 60 seconds per 1 minute * 5 minutes (greater than 5 minutes have past)
+var TIME_BETWEEN_PULLS = 1000 * 60 * 1; // 1000 milliseconds per 1 second * 60 seconds per 1 minute * 5 minutes (greater than 5 minutes have past)
 var MAX_RECENT_POSTS = 25;
 function startRecentPostsPull() {
     PULL_ID = "posts_ajax_last_request";
@@ -359,7 +375,7 @@ function startRecentPostsPull() {
     }
     else {
         var timeLeftToElapse = TIME_BETWEEN_PULLS - (currentDate - lastPullDate);
-        setTimeout(timeLeftToElapse, pullWatchedThreadsAndRecentPosts);
+        setTimeout(pullWatchedThreadsAndRecentPosts,timeLeftToElapse);
     }
 }
 
@@ -385,8 +401,8 @@ function pullWatchedThreadsAndRecentPosts() {
             console.log("[Thread Watcher] We could not find the latest posts");
             }
         });
-
-      setTimeout(TIME_BETWEEN_PULLS, pullWatchedThreadsAndRecentPosts);
+      console.log("[Thread Watcher] Setting check time again in " + TIME_BETWEEN_PULLS / 1000 + " seconds.");
+      setTimeout(pullWatchedThreadsAndRecentPosts,TIME_BETWEEN_PULLS);
 }
 
 function getForumIDFromThreadID(json, id) {
@@ -411,7 +427,7 @@ function clearOldThreads(arr, arrForums) {
             newToStore[STORED_RECENT_THREADS_PREFIX + arr[i]] = alreadyStored[STORED_RECENT_THREADS_PREFIX + arr[i]]; //what is stored is the post count and forum ID
         }
         else {
-            newToStore[STORED_RECENT_THREADS_PREFIX + arr[i]] = {forumID:arrForums[i], seenPostCount:0, livePostCount:0}
+            newToStore[STORED_RECENT_THREADS_PREFIX + arr[i]] = {forumID:arrForums[i], threadID:arr[i], seenPostCount:0, livePostCount:0};
         }
     }
     console.log("[Thread Watcher] Clearing old threads saving");
@@ -466,13 +482,20 @@ function processThreadsCheckingForUpdates() {
              var livePostCount = json.topic.posts_count;
              if(livePostCount != seenPostCount) {
                 console.log("[Thread Watcher] We've found a thread that has new activity:" , livePostCount - seenPostCount, "new posts. Thread ID:", processThreadID);
+                storedThread.differenceInPostCount = livePostCount - seenPostCount;
                 storedThread.livePostCount = livePostCount;
-                
+                storedThread.title = json.topic.title;
+                storedThread.latestPostBy = json.topic.latest_post_by;
+                storedThread.lastPage = Math.ceil(json.topic.posts_count /25); // 25 posts per page, estimate last page data
              }
              localStorage.setItem(STORED_RECENT_THREADS, JSON.stringify(alreadyStored));
-             updateThreadIcon();
              localStorage.setItem(THREADS_TO_PROCESS, JSON.stringify(currentListToProcess)); //save the shifted array
+             if(livePostCount != seenPostCount)
+             {
+                updateThreadIcon();
+             }
              //recursive call:
+             console.log(processThreadsCheckingForUpdates);
              processThreadsCheckingForUpdates();
            },
           onFailure: function(t) {   
@@ -495,18 +518,84 @@ function updateIfThreadIsRecent(id) {
 }
 
 function updateThreadIcon() {
-    var numberOfThreadsWithUpdates = 0;
+    //{forumID:arrForums[i], lastPage:0, threadID:arr[i], latestPostBy:"asd", seenPostCount:0, livePostCount:0}
+    while($('forum_activity_lister').firstDescendant()) { 
+        $('forum_activity_lister').firstDescendant().remove();
+     }
+
+
+    var threadsWithUpdatesMetaData = [];
     var alreadyStored = JSON.parse(localStorage.getItem(STORED_RECENT_THREADS)) || {};
     for (var key in alreadyStored) {
       if (alreadyStored.hasOwnProperty(key)) {
         var thread = alreadyStored[key];
         if(thread.livePostCount > thread.seenPostCount) {
-            numberOfThreadsWithUpdates++;
+            console.log("We are updating the thread icon");
+            threadsWithUpdatesMetaData.push(thread);
+            var threadContainer = new Element("li");
+            var threadDisplay = new Element('a', {
+                target: (/\.com\/games/.test(location.href)) ? "_blank" : "",
+                href: 'http://www.kongregate.com/forums/' + thread.forumID + '/topics/' + thread.threadID + (thread.lastPage > 0 ? '?page=' + thread.lastPage : '')
+            }).update(createStyledThreadUsername(thread.latestPostBy) + ' <i class="faded_in_menu">posted in</i> ' + createStyledThreadTitle(thread.title) + ' ' + createStyledThreadNewPostCount(thread.differenceInPostCount));
+
+            //var posterDisplay = new Element("span").update(thread.latestPostBy + ' | ');
+            //threadContainer.insert(posterDisplay);
+            threadContainer.insert(threadDisplay);
+            $('forum_activity_lister').insert(threadContainer);
         }
       }
     }
     console.log("[Thread Watcher] Updating count in welcome bar");
-    $('forum_counter').update(numberOfThreadsWithUpdates);
+    $('forum_counter').update(threadsWithUpdatesMetaData.length);
+    
+
+    var clear_cache_setting = new Element("span",{class:"setting_in_menu"}).update("Clear Cache");
+    clear_cache_setting.on("click", function(e) {
+        localStorage.removeItem(STORED_RECENT_THREADS);
+        localStorage.removeItem(PULL_ID);
+        localStorage.removeItem(THREADS_TO_PROCESS);
+        localStorage.removeItem(THREADS_ARE_CURRENTLY_PROCESSING);
+        localStorage.removeItem(STORED_RECENT_THREADS);
+        e.target.textContent = "Cleared";
+        $('forum_counter').update(0);
+        //remove all
+        while($('forum_activity_lister').firstDescendant()) { 
+            $('forum_activity_lister').firstDescendant().remove();
+        }
+        return false;
+    });
+
+    var mark_as_read_setting = new Element("span",{class:"setting_in_menu"}).update("Mark all as read");
+    mark_as_read_setting.on("click", function(e) {
+        var alreadyStored = JSON.parse(localStorage.getItem(STORED_RECENT_THREADS)) || {};
+        for (var key in alreadyStored) {
+            if (alreadyStored.hasOwnProperty(key)) {
+                var thread = alreadyStored[key];
+                thread.seenPostCount = thread.livePostCount;
+                
+            }
+        }
+        localStorage.setItem(STORED_RECENT_THREADS, JSON.stringify(alreadyStored));
+        $('forum_counter').update(0);
+        return false;
+    });
+
+    $('forum_activity_lister').insert(clear_cache_setting);
+    $('forum_activity_lister').insert(mark_as_read_setting);
+
+}
+function createStyledThreadUsername(u) {
+    return "<span class='username_in_menu'>" + u + "</span>";
+}
+
+function createStyledThreadTitle(t) {
+    if(t.length > 30) {
+        t = t.substring(0,27) + '...';
+    }
+    return "<span class='thread_title_in_menu'>" + t + "</span>";
+}
+function createStyledThreadNewPostCount(p) {
+    return "<span class='post_count_in_menu'>" + p + " new posts</span>";
 }
 
 (function() {
